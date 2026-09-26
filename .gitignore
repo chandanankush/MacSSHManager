@@ -1,0 +1,16 @@
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.worktrees/
+
+# Local signing identities and credentials
+.env
+.env.*
+*.p12
+*.pfx
+*.key
+*.pem
+*.cer
+*.mobileprovision

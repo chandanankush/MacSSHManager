@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible non-security problem.
+body:
+  - type: markdown
+    attributes:
+      value: "For suspected vulnerabilities, follow SECURITY.md instead. Do not include credentials, signing identities, or production logs."
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS version and Mac architecture
+      placeholder: "For example: macOS 26, Apple Silicon"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Describe the minimum steps on a test Mac; redact personal information.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and observed behavior
+    validations:
+      required: true

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  public:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS build and tests
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Check source and installer syntax
+        run: |
+          python3 scripts/check-source.py
+          bash -n Installer/build-package.sh Installer/package-payload.sh Installer/scripts/preinstall Installer/scripts/postinstall Installer/scripts/uninstall
+          plutil -lint Config/*.plist
+          git diff --check
+
+      - name: Test
+        run: |
+          xcodebuild test -quiet \
+            -project MacSSHManager.xcodeproj \
+            -scheme MacSSHManager \
+            -destination 'platform=macOS,arch=arm64' \
+            -derivedDataPath build/CI \
+            -resultBundlePath build/Tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Build Release
+        run: |
+          xcodebuild build -quiet \
+            -project MacSSHManager.xcodeproj \
+            -scheme MacSSHManager \
+            -configuration Release \
+            -derivedDataPath build/CI \
+            CODE_SIGNING_ALLOWED=NO
+          python3 scripts/check-source.py --app 'build/CI/Build/Products/Release/Mac SSH Manager.app'
+
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: macos-test-results
+          path: build/Tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7

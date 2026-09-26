@@ -1,0 +1,286 @@
+#!/bin/bash
+set -euo pipefail
+set -o errtrace
+
+if [[ "${SERVERPC_SSH_CONTROL_CLEAN_ENV:-}" != "1" ]]; then
+    exec /usr/bin/env -i SERVERPC_SSH_CONTROL_CLEAN_ENV=1 \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C /bin/bash "$0" "$@"
+fi
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+LANG=C
+LC_ALL=C
+export PATH LANG LC_ALL
+
+APP_ROOT="/Library/Application Support/ServerPCSSHControl"
+INCOMING_APP="${APP_ROOT}/.Incoming/Mac SSH Manager.app"
+INCOMING_POLICY="${APP_ROOT}/.Incoming/trusted-client.json"
+FINAL_APP="/Applications/Mac SSH Manager.app"
+LEGACY_APP="${APP_ROOT}/ServerPC SSH Control.app"
+STATE_ROOT="${APP_ROOT}/State"
+SUPPORT_README="${APP_ROOT}/README.txt"
+CONTROLLER_PLIST="/Library/LaunchDaemons/com.serverpc.ssh-control.controller.plist"
+ENFORCER_PLIST="/Library/LaunchDaemons/com.serverpc.ssh-control.enforcer.plist"
+SSH_POLICY_FILE="/etc/ssh/sshd_config.d/00-serverpc-ssh-control.conf"
+SSH_POLICY_MARKER="${STATE_ROOT}/ssh-policy-managed"
+REMOTE_LOGIN_MARKER="${STATE_ROOT}/remote-login-enabled"
+PF_CONF="/etc/pf.conf"
+PF_ANCHOR="/etc/pf.anchors/com.serverpc.ssh-control"
+PF_RECOVERY="/etc/pf.conf.serverpc-ssh-control.recovery"
+RIGHT_NAME="com.serverpc.ssh-control.open"
+BEGIN_MARKER="# BEGIN SERVERPC SSH CONTROL"
+END_MARKER="# END SERVERPC SSH CONTROL"
+WORK_DIR="$(/usr/bin/mktemp -d /private/var/run/serverpc-ssh-control-install.XXXXXX)"
+RECOVERY_READY=0
+SSH_POLICY_CREATED=0
+SSH_POLICY_MARKER_CREATED=0
+SSH_POLICY_UPGRADED=0
+REMOTE_LOGIN_MARKER_CREATED=0
+ROLLBACK_ARMED=0
+
+cleanup() {
+    /bin/rm -rf "${WORK_DIR}"
+}
+
+fail() {
+    /bin/echo "Mac SSH Manager install failed: $1" >&2
+    if [[ "${ROLLBACK_ARMED}" -eq 1 ]]; then
+        rollback_closed 1
+    fi
+    exit 1
+}
+
+write_managed_pf_configuration() {
+    candidate="$1"
+    /usr/bin/awk -v begin="${BEGIN_MARKER}" -v end="${END_MARKER}" '
+        $0 == begin { managed = 1; next }
+        $0 == end { managed = 0; next }
+        !managed { print }
+    ' "${PF_CONF}" > "${candidate}"
+    {
+        /bin/echo "${BEGIN_MARKER}"
+        /bin/echo 'anchor "com.serverpc.ssh-control"'
+        /bin/echo 'load anchor "com.serverpc.ssh-control" from "/etc/pf.anchors/com.serverpc.ssh-control"'
+        /bin/echo "${END_MARKER}"
+    } >> "${candidate}"
+}
+
+write_managed_ssh_policy() {
+    /bin/echo 'PasswordAuthentication no'
+    /bin/echo 'KbdInteractiveAuthentication no'
+    /bin/echo 'PubkeyAuthentication yes'
+    /bin/echo 'PermitRootLogin no'
+}
+
+write_legacy_managed_ssh_policy_v1() {
+    /bin/echo 'PasswordAuthentication no'
+    /bin/echo 'KbdInteractiveAuthentication no'
+    /bin/echo 'PubkeyAuthentication yes'
+}
+
+verify_effective_ssh_policy() {
+    temporary_host_key="${WORK_DIR}/hostkey_ed25519"
+    /usr/bin/ssh-keygen -q -t ed25519 -N '' -f "${temporary_host_key}" || return 1
+    sshd_effective="$(/usr/sbin/sshd -T -o "HostKey=${temporary_host_key}" 2>/dev/null)" || return 1
+    /usr/bin/grep -qx 'passwordauthentication no' <<<"${sshd_effective}" && \
+        /usr/bin/grep -qx 'kbdinteractiveauthentication no' <<<"${sshd_effective}" && \
+        /usr/bin/grep -qx 'pubkeyauthentication yes' <<<"${sshd_effective}" && \
+        /usr/bin/grep -qx 'permitrootlogin no' <<<"${sshd_effective}"
+}
+
+configure_managed_ssh_policy() {
+    [[ -d /etc/ssh/sshd_config.d && ! -L /etc/ssh/sshd_config.d ]] || \
+        fail "the SSH configuration directory is missing or unsafe"
+    policy_source="${WORK_DIR}/serverpc-ssh-control.conf"
+    legacy_policy_source="${WORK_DIR}/serverpc-ssh-control-v1.conf"
+    marker_source="${WORK_DIR}/ssh-policy-managed"
+    write_managed_ssh_policy > "${policy_source}"
+    write_legacy_managed_ssh_policy_v1 > "${legacy_policy_source}"
+    /bin/echo 'managed-ssh-policy-v2' > "${marker_source}"
+
+    if [[ -e "${SSH_POLICY_FILE}" ]]; then
+        [[ -f "${SSH_POLICY_FILE}" && ! -L "${SSH_POLICY_FILE}" ]] || \
+            fail "the managed SSH policy file is unsafe"
+        policy_metadata="$(/usr/bin/stat -f '%u %Lp' "${SSH_POLICY_FILE}")"
+        [[ "${policy_metadata}" == "0 600" ]] || fail "the managed SSH policy file has unsafe ownership"
+        [[ -f "${SSH_POLICY_MARKER}" && ! -L "${SSH_POLICY_MARKER}" ]] || \
+            fail "the managed SSH policy ownership marker is missing or unsafe"
+        [[ "$(/usr/bin/stat -f '%u %Lp' "${SSH_POLICY_MARKER}")" == "0 600" ]] || \
+            fail "the managed SSH policy ownership marker has unsafe ownership"
+        marker_value="$(< "${SSH_POLICY_MARKER}")"
+        if /usr/bin/cmp -s "${policy_source}" "${SSH_POLICY_FILE}" && \
+            [[ "${marker_value}" == "managed-ssh-policy-v2" ]]; then
+            :
+        elif /usr/bin/cmp -s "${legacy_policy_source}" "${SSH_POLICY_FILE}" && \
+            [[ "${marker_value}" == "managed-ssh-policy-v1" ]]; then
+            /bin/cp -p "${SSH_POLICY_FILE}" "${WORK_DIR}/ssh-policy-backup"
+            /bin/cp -p "${SSH_POLICY_MARKER}" "${WORK_DIR}/ssh-policy-marker-backup"
+            SSH_POLICY_UPGRADED=1
+            /usr/bin/install -o root -g wheel -m 600 "${policy_source}" "${SSH_POLICY_FILE}"
+            /usr/bin/install -o root -g wheel -m 600 "${marker_source}" "${SSH_POLICY_MARKER}"
+        else
+            fail "the managed SSH policy file already exists with different content"
+        fi
+    else
+        /usr/bin/install -o root -g wheel -m 600 "${policy_source}" "${SSH_POLICY_FILE}"
+        SSH_POLICY_CREATED=1
+        /usr/bin/install -o root -g wheel -m 600 "${marker_source}" "${SSH_POLICY_MARKER}"
+        SSH_POLICY_MARKER_CREATED=1
+    fi
+    verify_effective_ssh_policy || fail "managed SSH policy could not be verified"
+}
+
+configure_managed_remote_login() {
+    remote_login_state="$(/usr/sbin/systemsetup -getremotelogin 2>/dev/null)" || \
+        fail "could not determine the Remote Login setting"
+    case "${remote_login_state}" in
+        'Remote Login: On') ;;
+        'Remote Login: Off')
+            /usr/sbin/systemsetup -setremotelogin on >/dev/null || \
+                fail "could not enable Remote Login"
+            REMOTE_LOGIN_MARKER_CREATED=1
+            /bin/echo 'managed-remote-login-v1' > "${WORK_DIR}/remote-login-enabled"
+            /usr/bin/install -o root -g wheel -m 600 \
+                "${WORK_DIR}/remote-login-enabled" "${REMOTE_LOGIN_MARKER}"
+            ;;
+        *) fail "the Remote Login setting returned an unexpected value" ;;
+    esac
+    /usr/bin/ssh-keygen -A >/dev/null || fail "could not create required SSH host keys"
+    /usr/sbin/sshd -t >/dev/null 2>&1 || fail "the SSH server could not be validated"
+}
+
+enforce_closed() {
+    closed_source="${WORK_DIR}/closed-anchor.conf"
+    [[ -f "${closed_source}" && ! -L "${closed_source}" ]]
+    /usr/bin/install -d -o root -g wheel -m 755 /etc/pf.anchors
+    /usr/bin/install -o root -g wheel -m 600 "${closed_source}" "${PF_ANCHOR}"
+
+    candidate="${WORK_DIR}/pf.conf"
+    write_managed_pf_configuration "${candidate}"
+    /sbin/pfctl -nf "${candidate}" >/dev/null
+    /usr/bin/install -o root -g wheel -m 600 "${candidate}" "${PF_RECOVERY}"
+    RECOVERY_READY=1
+    /usr/bin/install -o root -g wheel -m 600 "${PF_RECOVERY}" "${PF_CONF}"
+
+    if ! /sbin/pfctl -s info | /usr/bin/grep -qi '^Status: Enabled'; then
+        /sbin/pfctl -E >/dev/null 2>&1
+    fi
+    /sbin/pfctl -f "${PF_CONF}" >/dev/null
+    /sbin/pfctl -a com.serverpc.ssh-control -f "${PF_ANCHOR}" >/dev/null
+}
+
+verify_closed() {
+    /sbin/pfctl -s info | /usr/bin/grep -qi '^Status: Enabled' || return 1
+    anchor_rules="$(/sbin/pfctl -a com.serverpc.ssh-control -sr 2>/dev/null)" || return 1
+    [[ "$(/usr/bin/awk 'NF { count += 1 } END { print count + 0 }' <<<"${anchor_rules}")" == "1" ]] || return 1
+    /usr/bin/grep -Eq '^block drop in quick proto tcp from any to any port( =)? 22$' <<<"${anchor_rules}"
+}
+
+rollback_closed() {
+    result="${1:-$?}"
+    ROLLBACK_ARMED=0
+    trap - ERR
+    if [[ "${SSH_POLICY_UPGRADED}" -eq 1 ]]; then
+        /usr/bin/install -o root -g wheel -m 600 \
+            "${WORK_DIR}/ssh-policy-backup" "${SSH_POLICY_FILE}" || true
+        /usr/bin/install -o root -g wheel -m 600 \
+            "${WORK_DIR}/ssh-policy-marker-backup" "${SSH_POLICY_MARKER}" || true
+    fi
+    if [[ "${SSH_POLICY_MARKER_CREATED}" -eq 1 ]]; then
+        /bin/rm -f "${SSH_POLICY_MARKER}" || true
+    fi
+    if [[ "${SSH_POLICY_CREATED}" -eq 1 ]]; then
+        /bin/rm -f "${SSH_POLICY_FILE}" || true
+    fi
+    if [[ "${REMOTE_LOGIN_MARKER_CREATED}" -eq 1 ]]; then
+        /usr/sbin/systemsetup -setremotelogin off >/dev/null 2>&1 || true
+        /bin/rm -f "${REMOTE_LOGIN_MARKER}" || true
+    fi
+    if [[ "${RECOVERY_READY}" -eq 1 ]]; then
+        /usr/bin/install -o root -g wheel -m 600 "${PF_RECOVERY}" "${PF_CONF}" || true
+        /usr/bin/install -o root -g wheel -m 600 \
+            "${WORK_DIR}/closed-anchor.conf" "${PF_ANCHOR}" || true
+        /sbin/pfctl -nf "${PF_CONF}" >/dev/null 2>&1 && \
+            /sbin/pfctl -f "${PF_CONF}" >/dev/null 2>&1 || true
+        /sbin/pfctl -a com.serverpc.ssh-control -f "${PF_ANCHOR}" >/dev/null 2>&1 || true
+        verify_closed || /bin/echo "CRITICAL: unable to verify CLOSED during installer rollback" >&2
+    fi
+    cleanup
+    exit "${result}"
+}
+
+make_menu_available() {
+    /usr/bin/codesign --verify --deep --strict "${INCOMING_APP}"
+    /usr/bin/plutil -p "${INCOMING_POLICY}" >/dev/null
+
+    if [[ -e "${FINAL_APP}" ]]; then
+        [[ -d "${FINAL_APP}" && ! -L "${FINAL_APP}" ]] || fail "the existing Applications app is unsafe"
+        [[ "$(/usr/bin/stat -f '%u' "${FINAL_APP}")" == "0" ]] || fail "the existing Applications app is not root-owned"
+    fi
+    if [[ -e "${LEGACY_APP}" ]]; then
+        [[ -d "${LEGACY_APP}" && ! -L "${LEGACY_APP}" ]] || fail "the legacy application is unsafe"
+        [[ "$(/usr/bin/stat -f '%u' "${LEGACY_APP}")" == "0" ]] || fail "the legacy application is not root-owned"
+    fi
+    [[ -d /Applications && ! -L /Applications ]] || fail "the Applications directory is missing or unsafe"
+    /bin/rm -rf "${FINAL_APP}"
+    /usr/bin/ditto "${INCOMING_APP}" "${FINAL_APP}"
+    /usr/sbin/chown -R root:wheel "${FINAL_APP}"
+    /bin/chmod -R go-w "${FINAL_APP}"
+
+    /usr/bin/install -d -o root -g wheel -m 700 "${STATE_ROOT}"
+    /usr/bin/install -o root -g wheel -m 600 \
+        "${INCOMING_POLICY}" \
+        "${STATE_ROOT}/trusted-client.json"
+    /usr/bin/install -o root -g wheel -m 644 \
+        "${FINAL_APP}/Contents/Resources/README.txt" \
+        "${SUPPORT_README}"
+    /usr/bin/security authorizationdb write "${RIGHT_NAME}" \
+        < "${FINAL_APP}/Contents/Resources/AuthorizationRight.plist" >/dev/null
+    /bin/rm -rf "${APP_ROOT}/.Incoming"
+    /bin/rm -rf "${LEGACY_APP}"
+    /usr/bin/touch "${STATE_ROOT}/installation-ready"
+    /usr/sbin/chown root:wheel "${STATE_ROOT}/installation-ready"
+    /bin/chmod 600 "${STATE_ROOT}/installation-ready"
+}
+
+install_privileged_services() {
+    controller_source="${FINAL_APP}/Contents/Resources/controller-launchd.plist"
+    enforcer_source="${FINAL_APP}/Contents/Resources/enforcer-launchd.plist"
+    [[ -f "${controller_source}" && ! -L "${controller_source}" ]] || fail "controller launch daemon definition is unavailable"
+    [[ -f "${enforcer_source}" && ! -L "${enforcer_source}" ]] || fail "expiry enforcer launch daemon definition is unavailable"
+    /usr/bin/plutil -lint "${controller_source}" >/dev/null
+    /usr/bin/plutil -lint "${enforcer_source}" >/dev/null
+
+    /usr/bin/install -o root -g wheel -m 644 "${controller_source}" "${CONTROLLER_PLIST}"
+    /usr/bin/install -o root -g wheel -m 644 "${enforcer_source}" "${ENFORCER_PLIST}"
+    /bin/launchctl bootout system/com.serverpc.ssh-control.controller >/dev/null 2>&1 || true
+    /bin/launchctl bootout system/com.serverpc.ssh-control.enforcer >/dev/null 2>&1 || true
+    /bin/launchctl bootstrap system "${CONTROLLER_PLIST}"
+    /bin/launchctl bootstrap system "${ENFORCER_PLIST}"
+    /bin/launchctl print system/com.serverpc.ssh-control.controller >/dev/null
+    /bin/launchctl print system/com.serverpc.ssh-control.enforcer >/dev/null
+}
+
+[[ "${EUID}" -eq 0 ]]
+[[ -d "${INCOMING_APP}" && ! -L "${INCOMING_APP}" ]]
+[[ -f "${INCOMING_POLICY}" && ! -L "${INCOMING_POLICY}" ]]
+/usr/bin/install -o root -g wheel -m 600 \
+    "${INCOMING_APP}/Contents/Resources/closed-anchor.conf" "${WORK_DIR}/closed-anchor.conf"
+ROLLBACK_ARMED=1
+trap rollback_closed ERR
+
+/usr/bin/install -d -o root -g wheel -m 755 "${APP_ROOT}"
+/usr/bin/install -d -o root -g wheel -m 700 "${STATE_ROOT}"
+enforce_closed
+verify_closed
+configure_managed_remote_login
+configure_managed_ssh_policy
+make_menu_available
+install_privileged_services
+verify_closed
+
+trap - ERR
+ROLLBACK_ARMED=0
+cleanup
+/usr/bin/logger -t serverpc-ssh-control "install succeeded; port 22 is CLOSED"
+/bin/echo "Mac SSH Manager installed CLOSED. Its privileged services are running; launch the menu app locally."
+exit 0

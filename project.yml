@@ -1,0 +1,243 @@
+name: MacSSHManager
+options:
+  bundleIdPrefix: com.serverpc.ssh-control
+  deploymentTarget:
+    macOS: "13.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CLANG_ENABLE_MODULES: YES
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    SERVERPC_FRAMEWORK_MACH_O_TYPE: mh_dylib
+targets:
+  SharedProtocol:
+    type: framework
+    platform: macOS
+    sources:
+      - Sources/SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.shared-protocol
+        MACH_O_TYPE: "$(SERVERPC_FRAMEWORK_MACH_O_TYPE)"
+        GENERATE_INFOPLIST_FILE: YES
+  SharedProtocolTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/SharedProtocolTests
+    dependencies:
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.shared-protocol-tests
+        GENERATE_INFOPLIST_FILE: YES
+  SecurityCore:
+    type: framework
+    platform: macOS
+    sources:
+      - Sources/SecurityCore
+    dependencies:
+      - target: SharedProtocol
+      - sdk: libbsm.tbd
+      - sdk: Security.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.security-core
+        MACH_O_TYPE: "$(SERVERPC_FRAMEWORK_MACH_O_TYPE)"
+        GENERATE_INFOPLIST_FILE: YES
+  SecurityCoreTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/SecurityCoreTests
+    dependencies:
+      - target: SecurityCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.security-core-tests
+        GENERATE_INFOPLIST_FILE: YES
+  ControllerTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/ControllerTests
+    dependencies:
+      - target: SecurityCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.controller-tests
+        GENERATE_INFOPLIST_FILE: YES
+  ControllerTransport:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/ControllerDaemon
+        excludes:
+          - main.swift
+    dependencies:
+      - target: SecurityCore
+      - target: SharedProtocol
+      - sdk: Security.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.controller-transport
+        MACH_O_TYPE: "$(SERVERPC_FRAMEWORK_MACH_O_TYPE)"
+        GENERATE_INFOPLIST_FILE: YES
+  ControllerDaemon:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/ControllerDaemon/main.swift
+    dependencies:
+      - sdk: libbsm.tbd
+      - target: ControllerTransport
+      - target: SecurityCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.controller
+        INFOPLIST_FILE: Config/ControllerDaemon-Info.plist
+        PRODUCT_NAME: serverpc-ssh-controller
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../../Frameworks"
+  ExpiryEnforcer:
+    type: tool
+    platform: macOS
+    sources:
+      - Sources/ExpiryEnforcer
+    dependencies:
+      - sdk: libbsm.tbd
+      - target: SecurityCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.enforcer
+        INFOPLIST_FILE: Config/ExpiryEnforcer-Info.plist
+        PRODUCT_NAME: serverpc-ssh-expiry-enforcer
+        LD_RUNPATH_SEARCH_PATHS: "$(inherited) @executable_path/../../Frameworks"
+  IntegrationTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/IntegrationTests
+    dependencies:
+      - target: ControllerTransport
+      - target: SecurityCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.integration-tests
+        GENERATE_INFOPLIST_FILE: YES
+  MenuAppCore:
+    type: framework
+    platform: macOS
+    sources:
+      - path: Sources/MenuApp
+        excludes:
+          - MacSSHManagerApp.swift
+    dependencies:
+      - target: SharedProtocol
+      - sdk: Security.framework
+      - sdk: ServiceManagement.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.menu-core
+        MACH_O_TYPE: "$(SERVERPC_FRAMEWORK_MACH_O_TYPE)"
+        GENERATE_INFOPLIST_FILE: YES
+  MenuApp:
+    type: application
+    platform: macOS
+    sources:
+      - Sources/MenuApp/MacSSHManagerApp.swift
+      - Resources/Assets.xcassets
+    dependencies:
+      - target: MenuAppCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.menu
+        INFOPLIST_FILE: Config/MenuApp-Info.plist
+        PRODUCT_NAME: Mac SSH Manager
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: NO
+  MenuAppTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - Tests/MenuAppTests
+    dependencies:
+      - target: MenuAppCore
+      - target: SharedProtocol
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.serverpc.ssh-control.menu-tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  SharedProtocolTests:
+    build:
+      targets:
+        SharedProtocol: all
+        SharedProtocolTests: [test]
+    test:
+      targets:
+        - SharedProtocolTests
+  SecurityCoreTests:
+    build:
+      targets:
+        SharedProtocol: all
+        SecurityCore: all
+        SecurityCoreTests: [test]
+    test:
+      targets:
+        - SecurityCoreTests
+  ControllerTests:
+    build:
+      targets:
+        SharedProtocol: all
+        SecurityCore: all
+        ControllerTests: [test]
+    test:
+      targets:
+        - ControllerTests
+  IntegrationTests:
+    build:
+      targets:
+        SharedProtocol: all
+        SecurityCore: all
+        ControllerTransport: all
+        IntegrationTests: [test]
+    test:
+      targets:
+        - IntegrationTests
+  MenuAppTests:
+    build:
+      targets:
+        SharedProtocol: all
+        MenuAppCore: all
+        MenuAppTests: [test]
+    test:
+      targets:
+        - MenuAppTests
+  MacSSHManager:
+    build:
+      targets:
+        SharedProtocol: all
+        SharedProtocolTests: [test]
+        SecurityCore: all
+        SecurityCoreTests: [test]
+        ControllerTests: [test]
+        ControllerTransport: all
+        ControllerDaemon: all
+        ExpiryEnforcer: all
+        IntegrationTests: [test]
+        MenuAppCore: all
+        MenuApp: all
+        MenuAppTests: [test]
+    test:
+      targets:
+        - SharedProtocolTests
+        - SecurityCoreTests
+        - ControllerTests
+        - IntegrationTests
+        - MenuAppTests

@@ -1,0 +1,16 @@
+name: Feature request
+description: Describe a focused improvement and its purpose.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Include any effect on SSH scope, authorization, or installation.
+    validations:
+      required: true

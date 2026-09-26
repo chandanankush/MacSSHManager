@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Private security report
+    url: https://github.com/chandanankush/MacSSHManager/blob/main/SECURITY.md
+    about: Use the maintainer email in SECURITY.md; do not disclose vulnerability details in a public issue.

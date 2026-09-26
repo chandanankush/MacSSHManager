@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>class</key>
+    <string>user</string>
+    <key>group</key>
+    <string>admin</string>
+    <key>shared</key>
+    <false/>
+    <key>timeout</key>
+    <integer>10</integer>
+    <key>allow-root</key>
+    <false/>
+    <key>authenticate-user</key>
+    <true/>
+    <key>tries</key>
+    <integer>3</integer>
+    <key>comment</key>
+    <string>Open a bounded LAN SSH window on this Mac.</string>
+</dict>
+</plist>

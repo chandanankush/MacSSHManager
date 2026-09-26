@@ -1,0 +1,178 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ "${SERVERPC_SSH_CONTROL_CLEAN_ENV:-}" != "1" ]]; then
+    exec /usr/bin/env -i SERVERPC_SSH_CONTROL_CLEAN_ENV=1 \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C /bin/bash "$0" "$@"
+fi
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+LANG=C
+LC_ALL=C
+export PATH LANG LC_ALL
+
+APP_ROOT="/Library/Application Support/ServerPCSSHControl"
+APP="/Applications/Mac SSH Manager.app"
+HELPER="${APP}/Contents/Library/Helpers/serverpc-ssh-expiry-enforcer"
+PF_CONF="/etc/pf.conf"
+PF_ANCHOR="/etc/pf.anchors/com.serverpc.ssh-control"
+PF_RECOVERY="/etc/pf.conf.serverpc-ssh-control.recovery"
+RIGHT_NAME="com.serverpc.ssh-control.open"
+BEGIN_MARKER="# BEGIN SERVERPC SSH CONTROL"
+END_MARKER="# END SERVERPC SSH CONTROL"
+WORK_DIR="$(/usr/bin/mktemp -d /private/var/run/serverpc-ssh-control-uninstall.XXXXXX)"
+SSH_POLICY_FILE="/etc/ssh/sshd_config.d/00-serverpc-ssh-control.conf"
+SSH_POLICY_MARKER="${APP_ROOT}/State/ssh-policy-managed"
+REMOTE_LOGIN_MARKER="${APP_ROOT}/State/remote-login-enabled"
+CONTROLLER_PLIST="/Library/LaunchDaemons/com.serverpc.ssh-control.controller.plist"
+ENFORCER_PLIST="/Library/LaunchDaemons/com.serverpc.ssh-control.enforcer.plist"
+
+cleanup() {
+    /bin/rm -rf "${WORK_DIR}"
+}
+trap cleanup EXIT
+
+fail() {
+    /bin/echo "Mac SSH Manager uninstall failed: $1" >&2
+    exit 1
+}
+
+enforce_closed() {
+    [[ -x "${HELPER}" && ! -L "${HELPER}" ]] || fail "close-only helper is unavailable"
+    "${HELPER}" --close-once || fail "could not block port 22 and terminate active sessions"
+}
+
+remove_managed_pf_reference() {
+    candidate="${WORK_DIR}/pf.conf"
+    /usr/bin/awk -v begin="${BEGIN_MARKER}" -v end="${END_MARKER}" '
+        $0 == begin { managed = 1; next }
+        $0 == end { managed = 0; next }
+        !managed { print }
+    ' "${PF_CONF}" > "${candidate}"
+    /sbin/pfctl -nf "${candidate}" >/dev/null || fail "PF configuration without the managed anchor is invalid"
+    /usr/bin/install -o root -g wheel -m 600 "${candidate}" "${PF_CONF}"
+    /sbin/pfctl -f "${PF_CONF}" >/dev/null
+}
+
+remove_managed_ssh_policy() {
+    [[ -e "${SSH_POLICY_MARKER}" ]] || return 0
+    [[ -f "${SSH_POLICY_MARKER}" && ! -L "${SSH_POLICY_MARKER}" ]] || \
+        fail "the managed SSH policy ownership marker is unsafe"
+    [[ "$(/usr/bin/stat -f '%u %Lp' "${SSH_POLICY_MARKER}")" == "0 600" ]] || \
+        fail "the managed SSH policy ownership marker has unsafe ownership"
+    marker_value="$(< "${SSH_POLICY_MARKER}")"
+    [[ "${marker_value}" == "managed-ssh-policy-v1" || \
+        "${marker_value}" == "managed-ssh-policy-v2" ]] || \
+            fail "the managed SSH policy ownership marker is invalid"
+    if [[ -e "${SSH_POLICY_FILE}" ]]; then
+        [[ -f "${SSH_POLICY_FILE}" && ! -L "${SSH_POLICY_FILE}" ]] || \
+            fail "the managed SSH policy file is unsafe"
+        [[ "$(/usr/bin/stat -f '%u %Lp' "${SSH_POLICY_FILE}")" == "0 600" ]] || \
+            fail "the managed SSH policy file has unsafe ownership"
+        expected_policy="${WORK_DIR}/serverpc-ssh-control.conf"
+        {
+            /bin/echo 'PasswordAuthentication no'
+            /bin/echo 'KbdInteractiveAuthentication no'
+            /bin/echo 'PubkeyAuthentication yes'
+            if [[ "${marker_value}" == "managed-ssh-policy-v2" ]]; then
+                /bin/echo 'PermitRootLogin no'
+            fi
+        } > "${expected_policy}"
+        /usr/bin/cmp -s "${expected_policy}" "${SSH_POLICY_FILE}" || \
+            fail "the managed SSH policy file was modified; refusing to remove it"
+        /bin/rm -f "${SSH_POLICY_FILE}"
+    fi
+    /bin/rm -f "${SSH_POLICY_MARKER}"
+}
+
+remove_managed_remote_login() {
+    [[ -e "${REMOTE_LOGIN_MARKER}" ]] || return 0
+    [[ -f "${REMOTE_LOGIN_MARKER}" && ! -L "${REMOTE_LOGIN_MARKER}" ]] || \
+        fail "the Remote Login ownership marker is unsafe"
+    [[ "$(/usr/bin/stat -f '%u %Lp' "${REMOTE_LOGIN_MARKER}")" == "0 600" ]] || \
+        fail "the Remote Login ownership marker has unsafe ownership"
+    [[ "$(< "${REMOTE_LOGIN_MARKER}")" == "managed-remote-login-v1" ]] || \
+        fail "the Remote Login ownership marker is invalid"
+    remote_login_state="$(/usr/sbin/systemsetup -getremotelogin 2>/dev/null)" || \
+        fail "could not determine the Remote Login setting"
+    case "${remote_login_state}" in
+        'Remote Login: On') /usr/sbin/systemsetup -setremotelogin off >/dev/null || \
+            fail "could not restore the original Remote Login setting" ;;
+        'Remote Login: Off') ;;
+        *) fail "the Remote Login setting returned an unexpected value" ;;
+    esac
+    /bin/rm -f "${REMOTE_LOGIN_MARKER}"
+}
+
+remove_managed_launch_daemon() {
+    label="$1"
+    installed_plist="$2"
+    source_plist="$3"
+    /bin/launchctl bootout "system/${label}" >/dev/null 2>&1 || true
+    [[ -e "${installed_plist}" ]] || return 0
+    [[ -f "${installed_plist}" && ! -L "${installed_plist}" ]] || \
+        fail "the managed ${label} launch daemon definition is unsafe"
+    [[ "$(/usr/bin/stat -f '%u %Lp' "${installed_plist}")" == "0 644" ]] || \
+        fail "the managed ${label} launch daemon definition has unsafe ownership"
+    [[ -f "${source_plist}" && ! -L "${source_plist}" ]] || \
+        fail "the packaged ${label} launch daemon definition is unavailable"
+    /usr/bin/cmp -s "${source_plist}" "${installed_plist}" || \
+        fail "the managed ${label} launch daemon definition was modified; refusing to remove it"
+    /bin/rm -f "${installed_plist}"
+}
+
+remove_managed_launch_daemons() {
+    remove_managed_launch_daemon \
+        "com.serverpc.ssh-control.controller" \
+        "${CONTROLLER_PLIST}" \
+        "${APP}/Contents/Resources/controller-launchd.plist"
+    remove_managed_launch_daemon \
+        "com.serverpc.ssh-control.enforcer" \
+        "${ENFORCER_PLIST}" \
+        "${APP}/Contents/Resources/enforcer-launchd.plist"
+}
+
+remove_managed_login_item() {
+    console_user="$(/usr/bin/stat -f '%Su' /dev/console)"
+    [[ -n "${console_user}" && "${console_user}" != "root" ]] || return 0
+    /usr/bin/pkill -x "Mac SSH Manager" >/dev/null 2>&1 || true
+    /usr/bin/sudo -u "${console_user}" \
+        "${APP}/Contents/MacOS/Mac SSH Manager" --unregister-login-item >/dev/null 2>&1 || true
+}
+
+remove_managed_artifacts() {
+    /usr/bin/security authorizationdb remove "${RIGHT_NAME}" >/dev/null 2>&1 || true
+    /bin/rm -f \
+        "${PF_ANCHOR}" \
+        "${PF_RECOVERY}" \
+        /var/log/serverpc-ssh-control.jsonl \
+        /var/log/serverpc-ssh-control.jsonl.1 \
+        /var/log/serverpc-ssh-control.jsonl.2 \
+        /var/log/serverpc-ssh-control.jsonl.3 \
+        /var/log/serverpc-ssh-control.jsonl.4 \
+        /var/log/serverpc-ssh-control.jsonl.5
+    /bin/rm -rf "${APP}"
+    /bin/rm -rf "${APP_ROOT}"
+}
+
+[[ "${EUID}" -eq 0 ]] || fail "administrator execution is required"
+[[ -d "${APP_ROOT}" && ! -L "${APP_ROOT}" ]] || fail "installed application root is missing or unsafe"
+[[ "$(/usr/bin/stat -f '%u' "${APP_ROOT}")" == "0" ]] || fail "installed application root is not root-owned"
+[[ -d "${APP}" && ! -L "${APP}" ]] || fail "installed application is missing or unsafe"
+[[ "$(/usr/bin/stat -f '%u' "${APP}")" == "0" ]] || fail "installed application is not root-owned"
+[[ -f "${PF_CONF}" && ! -L "${PF_CONF}" ]] || fail "PF configuration is missing or unsafe"
+begin_count="$(/usr/bin/grep -Fxc "${BEGIN_MARKER}" "${PF_CONF}" || true)"
+end_count="$(/usr/bin/grep -Fxc "${END_MARKER}" "${PF_CONF}" || true)"
+[[ "${begin_count}" == "1" && "${end_count}" == "1" ]] || \
+    fail "the exact managed PF block is not installed"
+
+enforce_closed
+remove_managed_pf_reference
+remove_managed_ssh_policy
+remove_managed_remote_login
+remove_managed_launch_daemons
+remove_managed_login_item
+remove_managed_artifacts
+
+/bin/echo "WARNING: Normal port 22 is no longer protected by Mac SSH Manager."
+/bin/echo "The package-owned SSH authentication policy fragment was removed."
+exit 0

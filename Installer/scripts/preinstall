@@ -1,0 +1,55 @@
+#!/bin/bash
+set -euo pipefail
+
+if [[ "${SERVERPC_SSH_CONTROL_CLEAN_ENV:-}" != "1" ]]; then
+    exec /usr/bin/env -i SERVERPC_SSH_CONTROL_CLEAN_ENV=1 \
+        PATH=/usr/bin:/bin:/usr/sbin:/sbin LANG=C LC_ALL=C /bin/bash "$0" "$@"
+fi
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+LANG=C
+LC_ALL=C
+export PATH LANG LC_ALL
+
+PF_CONF="/etc/pf.conf"
+APP_ROOT="/Library/Application Support/ServerPCSSHControl"
+BEGIN_MARKER="# BEGIN SERVERPC SSH CONTROL"
+END_MARKER="# END SERVERPC SSH CONTROL"
+
+fail() {
+    /bin/echo "Mac SSH Manager preflight failed: $1" >&2
+    exit 1
+}
+
+[[ "${EUID}" -eq 0 ]] || fail "administrator execution is required"
+
+major_version="$(/usr/bin/sw_vers -productVersion | /usr/bin/awk -F. '{print $1}')"
+[[ "${major_version}" =~ ^[0-9]+$ ]] || fail "cannot determine macOS version"
+(( major_version >= 13 )) || fail "macOS 13 or newer is required"
+
+for tool in /sbin/pfctl /usr/sbin/sshd /usr/bin/security /usr/bin/codesign /usr/bin/stat; do
+    [[ -x "${tool}" ]] || fail "required system tool is unavailable"
+done
+
+[[ -f "${PF_CONF}" && ! -L "${PF_CONF}" ]] || fail "PF configuration is missing or unsafe"
+pf_metadata="$(/usr/bin/stat -f '%u %Lp' "${PF_CONF}")"
+pf_owner="${pf_metadata%% *}"
+pf_mode="${pf_metadata##* }"
+[[ "${pf_owner}" == "0" ]] || fail "PF configuration is not root-owned"
+(( (8#${pf_mode} & 8#022) == 0 )) || fail "PF configuration is group/world writable"
+/sbin/pfctl -nf /etc/pf.conf >/dev/null || fail "existing PF configuration is invalid"
+
+begin_count="$(/usr/bin/grep -Fxc "${BEGIN_MARKER}" "${PF_CONF}" || true)"
+end_count="$(/usr/bin/grep -Fxc "${END_MARKER}" "${PF_CONF}" || true)"
+[[ "${begin_count}" -le 1 && "${end_count}" -le 1 && "${begin_count}" == "${end_count}" ]] || \
+    fail "conflicting managed PF markers were found"
+
+if [[ -e "${APP_ROOT}" ]]; then
+    [[ -d "${APP_ROOT}" && ! -L "${APP_ROOT}" ]] || fail "application root is unsafe"
+    app_metadata="$(/usr/bin/stat -f '%u %Lp' "${APP_ROOT}")"
+    app_owner="${app_metadata%% *}"
+    app_mode="${app_metadata##* }"
+    [[ "${app_owner}" == "0" ]] || fail "existing application root is not root-owned"
+    (( (8#${app_mode} & 8#022) == 0 )) || fail "existing application root is group/world writable"
+fi
+
+exit 0
