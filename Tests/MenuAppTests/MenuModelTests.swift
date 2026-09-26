@@ -59,7 +59,7 @@ final class MenuModelTests: XCTestCase {
 
     func testOpenPassesSelectedScopeToTheClient() async {
         let client = StubController()
-        let model = MenuModel(client: client)
+        let model = MenuModel(client: client, authorization: RecordingAuthorizationRequester())
         model.scopeLAN = false
         model.scopeTailscale = true
 
