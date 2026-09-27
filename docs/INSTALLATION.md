@@ -2,9 +2,39 @@
 
 Install and remove Mac SSH Manager from the target Mac's attached display and keyboard, with administrator access. Installation changes PF, Remote Login, and SSH authentication policy. Do not perform it over the SSH connection being controlled.
 
+## Verify a release installer
+
+Experimental prebuilt packages are available in [GitHub Releases](https://github.com/chandanankush/MacSSHManager/releases). The first prerelease is **Apple Silicon (arm64) only**. The app and helpers use a local self-signed certificate; the package container is unsigned and the app is not notarized. Do not disable Gatekeeper or broadly trust a certificate to install it.
+
+Download `MacSSHManager.pkg` and `SHA256SUMS.txt` from the same release. Read its notes for the expected signing-certificate fingerprint and build limitations. Before installation, compare the package hash:
+
+```bash
+cd "$HOME/Downloads"
+/usr/bin/shasum -a 256 -c SHA256SUMS.txt
+```
+
+Both files must be from the intended release; a checksum file alone does not establish publisher identity. Record the certificate fingerprint from the trusted release notes, not from the downloaded app. Verify the payload without installing it:
+
+```bash
+PKG="$HOME/Downloads/MacSSHManager.pkg"
+EXPECTED_CERTIFICATE_SHA1="<40-uppercase-hex-characters-from-release-notes>"
+VERIFY_ROOT=$(/usr/bin/mktemp -d /tmp/macsshmanager-release-verify.XXXXXX)
+/usr/sbin/pkgutil --expand-full "$PKG" "$VERIFY_ROOT/expanded"
+APP="$VERIFY_ROOT/expanded/Payload/Library/Application Support/ServerPCSSHControl/.Incoming/Mac SSH Manager.app"
+/usr/bin/codesign --verify --deep --strict "$APP"
+for CODE in "$APP" \
+  "$APP/Contents/Library/Helpers/serverpc-ssh-controller" \
+  "$APP/Contents/Library/Helpers/serverpc-ssh-expiry-enforcer"; do
+  /usr/bin/codesign --verify --strict --check-expiration \
+    -R="certificate leaf = H\"${EXPECTED_CERTIFICATE_SHA1}\"" "$CODE"
+done
+```
+
+Stop if a hash, signature, certificate, or architecture check fails. Then follow the attached-console installation and full physical acceptance below. Prebuilt artifacts have passed build and package checks, which do not prove live enforcement on your Mac.
+
 ## Prepare an installer
 
-There is no generally supported, notarized binary download. Build an installer from source with full Xcode (Swift 6 support), its command-line tools, and XcodeGen. Use the [development build instructions](../CONTRIBUTING.md#development) and [local signing guide](LOCAL_SIGNING.md) to create and verify `build/MacSSHManager.pkg` with your own signing identity. The local installer container is unsigned; its application and helpers must pass certificate-pinned verification.
+To build your own installer from source, use full Xcode (Swift 6 support), its command-line tools, and XcodeGen. Use the [development build instructions](../CONTRIBUTING.md#development) and [local signing guide](LOCAL_SIGNING.md) to create and verify `build/MacSSHManager.pkg` with your own signing identity. The local installer container is unsigned; its application and helpers must pass certificate-pinned verification.
 
 Build and target Macs must use the same architecture. A universal build does not establish Intel acceptance. macOS 13 is the deployment target; each OS/architecture still needs the checks below.
 
@@ -69,7 +99,7 @@ installed and independently verified from the physical console.
 ## Install from the attached console
 
 Perform these steps with the target Mac's attached display and keyboard. Do not use
-normal SSH for installation. First complete [certificate-pinned verification](LOCAL_SIGNING.md#verify-before-installing) against the trusted build identity. Then verify the copied artifact and its embedded application without installing it:
+normal SSH for installation. First complete [release verification](#verify-a-release-installer) for a downloaded prerelease, or [certificate-pinned verification](LOCAL_SIGNING.md#verify-before-installing) against your own trusted build identity. Then verify the copied artifact and its embedded application without installing it:
 
 ```bash
 PKG="$HOME/Downloads/MacSSHManager.pkg"

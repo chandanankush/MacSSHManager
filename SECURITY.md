@@ -1,6 +1,6 @@
 # Security policy
 
-MacSSHManager is an experimental administrator-operated SSH access controller. Security fixes target the current `main` branch. There are no maintained binary release lines or security-support guarantees for older snapshots.
+MacSSHManager is an experimental administrator-operated SSH access controller. Security fixes target the current `main` branch. Published installers are experimental prereleases; older snapshots have no security-support guarantee.
 
 ## Reporting a vulnerability
 
@@ -12,4 +12,4 @@ Include the affected commit, macOS version and architecture, expected and observ
 
 The [security model](docs/SECURITY_MODEL.md) and [installation guide](docs/INSTALLATION.md) define the trust boundaries and physical acceptance procedure. Root access and possession of an administrator credential are outside the threat model. Third-party remote-control detection is advisory.
 
-Passing automated tests does not prove live parent PF ruleset traversal, CLOSED behavior before login, or enforcement on a particular Mac. Perform physical acceptance before relying on a local installation. Source publication is not a claim of a generally supported or notarized firewall product.
+Passing automated tests does not prove live parent PF ruleset traversal, CLOSED behavior before login, or enforcement on a particular Mac. Perform physical acceptance before relying on a local installation. A published installer does not establish these live properties on every target Mac.

@@ -62,7 +62,7 @@ security boundary.
 - Enforcer health checks whether its launchd query succeeds; there is no separate readiness heartbeat.
 - Build and target Macs must use the same architecture. The installed policy stores one architecture's client code hash.
 - Tailscale scope supports IPv4 only. A supported, unambiguous route is required; route drift closes access.
-- There is no generally supported, notarized binary release. Local signing produces an unsigned installer container with signed application code.
+- Experimental Apple Silicon installers are available as prereleases. The app is locally signed, the installer container is unsigned, and neither is Apple-notarized.
 - Apple's [TN3165](https://developer.apple.com/documentation/technotes/tn3165-packet-filter-is-not-api) describes PF as an administrator mechanism rather than a supported firewall-product API.
 
 ## Non-goals

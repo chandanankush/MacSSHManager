@@ -19,9 +19,9 @@ It controls inbound SSH on TCP port 22. It does not connect to other servers or 
 
 ## Get started
 
-The project is experimental and currently distributed as source. There is no generally supported, notarized app download. macOS 13 or later is the deployment target; verify your particular Mac before relying on it.
+The project is experimental. An [Apple Silicon installer](https://github.com/chandanankush/MacSSHManager/releases/tag/v1.0.0-beta.1) is available as a prerelease. Its package container is unsigned, and the app is locally signed rather than Apple-notarized. macOS 13 or later is the deployment target; verify your particular Mac before relying on it.
 
-1. Prepare your own installer using the [installation guide](docs/INSTALLATION.md#prepare-an-installer).
+1. Download the PKG from the release and [verify it](docs/INSTALLATION.md#verify-a-release-installer), or [build your own installer](docs/INSTALLATION.md#prepare-an-installer).
 2. Install from the target Mac's attached display and keyboard with administrator access. Use the installer package; copying the app alone does not install its controls.
 3. Complete the guide's [acceptance checks](docs/INSTALLATION.md#physical-acceptance-tests), including confirming SSH is closed before login.
 4. Open **Mac SSH Manager** from Applications.

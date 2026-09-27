@@ -1,6 +1,6 @@
 # Local signing
 
-This route is for administrator-controlled builds installed on your own Mac. It does not require Apple Developer membership and does not produce an Apple-notarized application. The installer container is unsigned; the app and both helpers are signed with your explicitly supplied certificate. It is not a public binary distribution workflow.
+This route is for administrator-controlled builds installed on your own Mac. It does not require Apple Developer membership and does not produce an Apple-notarized application. The installer container is unsigned; the app and both helpers are signed with your explicitly supplied certificate. This route does not produce an Apple-trusted, notarized installer.
 
 ## Prepare your own identity
 
