@@ -2,6 +2,12 @@
 
 This route is for administrator-controlled builds installed on your own Mac. It does not require Apple Developer membership and does not produce an Apple-notarized application. The installer container is unsigned; the app and both helpers are signed with your explicitly supplied certificate. This route does not produce an Apple-trusted, notarized installer.
 
+## Free Xcode accounts and local signing
+
+A local self-signed identity is created in Keychain Access and needs no Apple account. A free Xcode Apple account/Personal Team is a different development-signing route; it does not provide Developer ID certificates or notarization for public Mac distribution. The existing prerelease uses the local certificate-pinned route.
+
+An unsigned PKG with this payload can trigger Apple's verification warning. After checking its checksum and pinned signatures, use the documented [per-item Gatekeeper approval](INSTALLATION.md#apple-cannot-verify-the-installer) if you trust the release. Do not disable Gatekeeper or change global certificate trust.
+
 ## Prepare your own identity
 
 Use a dedicated code-signing identity whose private key remains in the build Mac's login keychain. The name and path below are examples, not credentials supplied by this repository.

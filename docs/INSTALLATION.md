@@ -32,6 +32,20 @@ done
 
 Stop if a hash, signature, certificate, or architecture check fails. Then follow the attached-console installation and full physical acceptance below. Prebuilt artifacts have passed build and package checks, which do not prove live enforcement on your Mac.
 
+## Apple cannot verify the installer
+
+The `v1.0.0-beta.1` package is unsigned and its locally signed payload is not Apple-notarized. Gatekeeper can show **Apple could not verify “MacSSHManager.pkg” is free of malware** when you open the downloaded package. Valid local code signatures and a matching checksum do not replace Apple's notarization check.
+
+If you trust this experimental release, first complete the package and pinned-signature verification above. Then, at the target Mac's attached console:
+
+1. Try opening the package in Finder, then dismiss the warning without deleting the package.
+2. Open **System Settings > Privacy & Security**, scroll to **Security**, and find the blocked `MacSSHManager.pkg` entry.
+3. Choose **Open Anyway**, authenticate if requested, and confirm **Open** to allow this specific installer.
+
+This is a per-item exception; keep Gatekeeper enabled and do not remove quarantine attributes or broadly trust the local certificate. The app itself may need a separate per-item approval on first launch. Follow [Apple's guidance](https://support.apple.com/en-us/102445) and continue with the installation and physical acceptance checks below. This approval does not establish that Apple has scanned or notarized the software.
+
+Removing this requirement for normal public distribution needs Developer ID Application signing for the app/helpers, Developer ID Installer signing for the PKG, secure signing timestamps, Apple notarization, and a stapled ticket. The current prerelease does not provide those.
+
 ## Prepare an installer
 
 To build your own installer from source, use full Xcode (Swift 6 support), its command-line tools, and XcodeGen. Use the [development build instructions](../CONTRIBUTING.md#development) and [local signing guide](LOCAL_SIGNING.md) to create and verify `build/MacSSHManager.pkg` with your own signing identity. The local installer container is unsigned; its application and helpers must pass certificate-pinned verification.

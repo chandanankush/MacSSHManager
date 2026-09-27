@@ -43,6 +43,7 @@ Choose **View full history** to search access events and successful SSH sessions
 
 ## Help and removal
 
+- **Apple cannot verify the installer:** read the [Gatekeeper guidance](docs/INSTALLATION.md#apple-cannot-verify-the-installer) after verifying the download.
 - [Installation, upgrade, troubleshooting, and rollback](docs/INSTALLATION.md)
 - [Recovery when the security service is unavailable](docs/PACKET_FILTER_REBOOT_RECOVERY.md#menu-behavior)
 - [Report a vulnerability privately](SECURITY.md); use [GitHub issues](https://github.com/chandanankush/MacSSHManager/issues) for other problems, with personal data redacted.

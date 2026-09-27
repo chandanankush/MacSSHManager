@@ -44,6 +44,8 @@ All notable changes to MacSSHManager are documented here.
 
 ### Documentation
 
+- Added verification-first, per-item Gatekeeper approval guidance for the unsigned installer prerelease.
+
 - Added an experimental Apple Silicon PKG prerelease with a package checksum and explicit local-signing/non-notarized installation guidance.
 
 - Simplified the README for end users and separated architecture, security-model, and installation guides. Removed the completed publication checklist and duplicated build guidance.
