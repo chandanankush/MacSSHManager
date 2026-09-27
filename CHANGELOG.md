@@ -31,6 +31,8 @@ All notable changes to MacSSHManager are documented here.
 
 ### Packaging
 
+- Included the MIT license inside the packaged application.
+
 - Added an explicit self-signed certificate mode for private builds without Apple Developer enrollment.
 - Local builds pin the exact helper signing certificate, preserve root-owned client code-hash checks, and retain hardened runtime by statically linking project modules.
 - Added a PKG-containing DMG for administrator installation.

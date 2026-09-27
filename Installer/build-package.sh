@@ -176,6 +176,8 @@ fi
     "${OUTPUT_APP}/Contents/Resources/AuthorizationRight.plist"
 /usr/bin/ditto "${REPOSITORY_ROOT}/Installer/resources/README.txt" \
     "${OUTPUT_APP}/Contents/Resources/README.txt"
+/usr/bin/ditto "${REPOSITORY_ROOT}/LICENSE" \
+    "${OUTPUT_APP}/Contents/Resources/LICENSE.txt"
 /usr/bin/ditto "${REPOSITORY_ROOT}/Installer/scripts/uninstall" \
     "${OUTPUT_APP}/Contents/Resources/uninstall"
 /bin/chmod 755 \
