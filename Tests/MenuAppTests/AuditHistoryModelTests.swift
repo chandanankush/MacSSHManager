@@ -45,13 +45,16 @@ final class AuditHistoryModelTests: XCTestCase {
 
     func testSearchIsDebouncedBeforeLoading() async {
         let controller = HistoryController(result: .success(.init(entries: [])))
+        let loaded = expectation(description: "Debounced history request")
+        controller.onHistoryRequest = { loaded.fulfill() }
         let model = AuditHistoryModel(client: controller)
 
         model.searchText = "dep"
         model.scheduleSearch()
         model.searchText = "deploy"
         model.scheduleSearch()
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        // The debounce is a minimum delay; the scheduler may run later under load.
+        await fulfillment(of: [loaded], timeout: 5)
 
         XCTAssertEqual(controller.queries, ["deploy"])
     }
@@ -98,11 +101,13 @@ private final class HistoryController: ControllerRequesting {
     private let result: Result<AuditHistoryPage, Error>
     private(set) var queries: [String?] = []
     private(set) var controlCalls = 0
+    var onHistoryRequest: (() -> Void)?
 
     init(result: Result<AuditHistoryPage, Error>) { self.result = result }
 
     func recentAuditHistory(query: String?) async throws -> AuditHistoryPage {
         queries.append(query)
+        onHistoryRequest?()
         return try result.get()
     }
     func open(
