@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Questions and feedback
+    url: https://github.com/chandanankush/MacSSHManager/discussions
+    about: Ask for help, share beta feedback, or discuss ideas with the community. Redact personal information.
   - name: Private security report
     url: https://github.com/chandanankush/MacSSHManager/security/advisories/new
     about: Report vulnerabilities privately through GitHub; do not include exploit details in public issues.

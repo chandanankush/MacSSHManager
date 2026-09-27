@@ -5,9 +5,24 @@
 [![CI](https://github.com/chandanankush/MacSSHManager/actions/workflows/ci.yml/badge.svg)](https://github.com/chandanankush/MacSSHManager/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Mac SSH Manager** is a macOS menu-bar app for opening temporary SSH access to this Mac. Choose LAN, Tailscale, or both, approve the macOS administrator prompt, and access closes when the timer ends.
+**Mac SSH Manager** opens SSH access to your Mac for a timed window, then closes it automatically. Choose LAN, Tailscale, or both from the macOS menu bar and approve the administrator prompt.
 
 It controls inbound SSH on TCP port 22. It does not connect to other servers or manage SSH keys.
+
+[Download the Apple Silicon beta](https://github.com/chandanankush/MacSSHManager/releases/tag/v1.0.0-beta.1) · [Installation guide](docs/INSTALLATION.md) · [Share feedback](https://github.com/chandanankush/MacSSHManager/discussions/4)
+
+The beta is locally signed and not Apple-notarized. Verify the download and follow the installation guide before trying it.
+
+<img src="docs/assets/app-preview.png" alt="Mac SSH Manager menu panel showing closed access and a 30-minute LAN and Tailscale window; simulated access states" width="860">
+
+<details>
+<summary>Watch the 12-second UI demo</summary>
+
+<img src="docs/assets/demo.gif" alt="Simulated UI demo showing access-window selection, opening SSH, the countdown, and closing access" width="960">
+
+The preview uses the actual app UI with simulated access states. The administrator approval prompt is not shown.
+
+</details>
 
 ## What you can do
 
@@ -51,5 +66,7 @@ Choose **View full history** to search access events and successful SSH sessions
 Uninstalling removes the port-22 protection and can make SSH reachable again. Follow the [rollback procedure](docs/INSTALLATION.md#rollback) from the attached console.
 
 ## For developers
+
+Questions and feedback are welcome in [Discussions](https://github.com/chandanankush/MacSSHManager/discussions). To contribute, start with the [good first issues](https://github.com/chandanankush/MacSSHManager/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22), or [help test the beta](https://github.com/chandanankush/MacSSHManager/issues/3) on an Apple Silicon Mac. Redact personal information from reports.
 
 See [Contributing](CONTRIBUTING.md), [Architecture](docs/ARCHITECTURE.md), and the [Security model](docs/SECURITY_MODEL.md). The project is available under the [MIT license](LICENSE); changes are listed in the [Changelog](CHANGELOG.md).
