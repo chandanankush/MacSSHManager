@@ -2,20 +2,9 @@
 
 ## Summary
 
-Mac SSH Manager depends on a dedicated PF anchor to keep inbound SSH fail-closed and to permit port 22 only for an explicitly authorized LAN or Tailscale scope. On macOS 26.7, PF could be disabled after reboot even though both root LaunchDaemons were loaded and running. The previous implementation exposed the controller immediately and relied on periodic close reconciliation to incidentally enable PF.
+Mac SSH Manager uses a dedicated PF anchor to keep inbound SSH closed outside an authorized LAN or Tailscale window. Both root helpers perform explicit startup recovery; a running helper alone does not prove enforcement is ready.
 
-The repair introduces an explicit privileged startup and recovery lifecycle. A helper process being alive is no longer considered sufficient evidence that SSH enforcement is ready.
-
-## Original failure
-
-The failure involved four interacting behaviors:
-
-1. `ControllerDaemon/main.swift` started the XPC listener without initializing PF.
-2. `ExpiryEnforcer/main.swift` immediately entered a 15-second reconciliation loop without a bounded startup phase.
-3. `PFController.enforceClosed()` contained a basic `pfctl -E` attempt, but it was embedded in close processing rather than represented as a retryable readiness state.
-4. `CloseCoordinator.close(trigger:)` appended a recovery audit event on every reconciliation pass, including identical failures.
-
-Consequently, a running LaunchDaemon could coexist with disabled PF, the menu could only report generic unavailability, and recovery failures produced repeated `Closed state recovered / Degraded` entries.
+See [architecture](ARCHITECTURE.md) for the full policy and [installation](INSTALLATION.md) for independent reboot and network probes.
 
 ## Ownership and trust boundaries
 
@@ -23,7 +12,7 @@ Consequently, a running LaunchDaemon could coexist with disabled PF, the menu co
 - The menu app never invokes PF directly.
 - All privileged commands use fixed absolute executable paths and fixed command shapes from `FixedCommandRunner.swift`.
 - Runtime policy files must be beneath the root-owned application state directory.
-- The application only loads `com.serverpc.ssh-control`; it does not flush or replace the global PF ruleset.
+- Runtime helpers only load `com.serverpc.ssh-control`; they do not flush or replace the global PF ruleset. Installation separately syntax-checks and reloads the complete managed `/etc/pf.conf`.
 - Neither normal shutdown nor menu-app exit calls `pfctl -d`.
 - The value returned by `pfctl -E` is retained by the privileged `PFController` instance and is never logged or exposed through XPC. The application does not issue `pfctl -X` because it must not accidentally withdraw enforcement needed by another live application component.
 
@@ -66,7 +55,7 @@ The menu can offer Open SSH only when all relevant checks succeed:
 - The application anchor can be read and parsed.
 - Its rules match the expected CLOSED or active-policy semantics.
 - The installed PF configuration and ownership checks pass.
-- The independent expiry enforcer is healthy.
+- The independent expiry enforcer passes the launchd-query health check (subject to the limits below).
 - The SSH authentication policy is safe.
 - When opening, the requested LAN/Tailscale snapshot is successfully written and verified before the operation is reported as successful.
 
@@ -148,86 +137,8 @@ Both definitions run as root and use `KeepAlive.SuccessfulExit = false`, avoidin
 
 The implementation does not depend on daemon launch order. Concurrent CLOSED initialization is safe because both components use the same narrow anchor and never install a pass rule during startup.
 
-## Build and packaging
+## Verification limits
 
-An ordinary Xcode Debug build produces the menu app and helper products separately. Production embedding is performed by `Installer/build-package.sh`, which:
+The health checker inspects the named anchor and on-disk linkage. It does not independently prove live parent-ruleset traversal. Enforcer health checks launchd query success, not a separate readiness heartbeat.
 
-1. Builds Release products.
-2. Copies both helpers to `Contents/Library/Helpers`.
-3. Copies the frameworks and LaunchDaemon resources.
-4. Signs frameworks, helpers, the menu executable, and the containing app.
-5. Verifies helper identifiers and either the expected Apple Team ID or the explicitly supplied local signing certificate.
-6. Generates the trusted-client policy from the signed menu executable.
-7. Builds and re-expands the installer package for verification.
-
-The default build uses an Apple application-signing identity for the fixed maintainer Team ID. The local-signing route instead requires an explicitly supplied DER certificate and its private key in the build Mac's keychain. It seals the certificate fingerprint into the signed app and pins the controller to that exact certificate plus its helper identifier. Ad-hoc signatures remain prohibited.
-
-Local builds statically link the project modules and verify that the three executables depend only on Apple system libraries. This preserves the hardened runtime without a library-validation exception. The controller still validates the menu's exact designated requirement, code hash, installed path, and console identity against the root-owned installation policy. No global certificate trust or Gatekeeper settings are changed. See [Local signing](LOCAL_SIGNING.md).
-
-Local build without Apple enrollment:
-
-```bash
-./Installer/build-package.sh \
-  --signing-identity "Mac SSH Manager Local Signing" \
-  --local-signing-certificate "$HOME/Library/Application Support/MacSSHManager/Signing/local-signing.cer" \
-  --build-only
-```
-
-Optional Apple-signed package build:
-
-```bash
-./Installer/build-package.sh \
-  --signing-identity "Developer ID Application: <name> (<maintainer-team-id>)" \
-  --installer-signing-identity "Developer ID Installer: <name> (<maintainer-team-id>)" \
-  --build-only
-```
-
-The outputs are `build/MacSSHManager.pkg` and `build/MacSSHManager.dmg`. Package verification supports both the direct component payload and the nested component produced by `productbuild`. The DMG contains the verified installer package rather than a drag-copy app because administrator installation must configure PF, SSH policy, authorization rights, and LaunchDaemons.
-
-## Post-install reboot verification
-
-After installing the newly signed package and restarting the target Mac from its attached console, run:
-
-```bash
-sudo /sbin/pfctl -s info
-sudo launchctl print system/com.serverpc.ssh-control.enforcer
-sudo launchctl print system/com.serverpc.ssh-control.controller
-sudo /sbin/pfctl -a 'com.serverpc.ssh-control' -sr
-sudo /sbin/pfctl -a '*' -sr
-sudo log show --last 10m --style compact \
-  --predicate 'subsystem == "com.serverpc.ssh-control"'
-```
-
-Expected results:
-
-- PF reports `Status: Enabled`.
-- Both helpers are loaded and remain running.
-- The application anchor contains the CLOSED port-22 rule before an access window is opened.
-- The menu reports control available.
-- LAN/Tailscale access can be opened only according to the selected verified policy.
-- Audit history contains no repeated identical degraded recovery entries.
-
-## Test coverage
-
-The automated suite covers:
-
-- PF already enabled.
-- PF disabled and successfully enabled.
-- PF enable command failure.
-- PF enable command succeeds but status remains disabled.
-- Anchor load and read-back validation failures.
-- Success after retry and bounded retry exhaustion.
-- Narrow application-anchor command construction.
-- Duplicate degraded-event coalescing and degraded-to-healthy recovery.
-- Real recovery closures, successful audit-write retry after lease removal, and quiet healthy reconciliation.
-- Retry invalidation of an in-flight OPEN, OPEN gating during recovery, and cleanup before retry waits.
-- Persistent degraded status and OPEN refusal after incomplete recovery cleanup.
-- Exact local-certificate helper requirements and rejection of malformed pins.
-- Payload discovery using real component and product packages, plus missing/ambiguous payload rejection.
-- Open SSH readiness gating.
-- Privileged Retry invocation from the menu model.
-- Installer prohibition of global PF disable and flush commands.
-
-Terminal verification on September 19, 2026: all 181 tests passed, and the self-signed Release app, both helpers, PKG, and DMG built successfully. Signature, certificate pin, hardened-runtime flag, system-library dependencies, and generated client-policy checks passed. Xcode emitted test-toolchain warnings; this is not a zero-diagnostics claim.
-
-Local tests and packaging do not prove boot-time enforcement on the target Mac. Live parent-anchor reachability, actual port-22 blocking before login, XPC authentication, and LAN/Tailscale behavior must still be checked on that Mac. The current health checker inspects the named anchor and on-disk linkage; it does not independently prove live parent-ruleset traversal. The independent-enforcer health check also checks launchctl command success, not a separate readiness heartbeat.
+The [installation acceptance checks](INSTALLATION.md#physical-acceptance-tests) must establish actual port-22 blocking before login, XPC authentication, network scope, expiry, and crash behavior on each target Mac. Build/signature verification is covered separately in [Local signing](LOCAL_SIGNING.md).

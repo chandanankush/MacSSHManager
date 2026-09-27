@@ -78,7 +78,7 @@ The `Payload` path above is for the default unsigned component package. Installe
 
 Do not derive the expected fingerprint only from the downloaded app: it must match the trusted build identity. Do not import the private key or broadly trust the certificate on the target. Certificate-pinned requirements do not require global CA trust.
 
-Follow the [installation and acceptance procedure](SECURITY_AND_OPERATIONS.md#install-from-the-attached-console) and [reboot checks](PACKET_FILTER_REBOOT_RECOVERY.md#post-install-reboot-verification). Local build and signature checks do not substitute for live XPC and PF testing.
+Follow the [installation and acceptance procedure](INSTALLATION.md#install-from-the-attached-console) and [reboot checks](INSTALLATION.md#verify-closed-before-login). Local build and signature checks do not substitute for live XPC and PF testing.
 
 ## Apple signing
 

@@ -42,7 +42,10 @@ All notable changes to MacSSHManager are documented here.
 
 ### Documentation
 
+- Simplified the README for end users and separated architecture, security-model, and installation guides. Removed the completed publication checklist and duplicated build guidance.
+- Replaced the public email contact with GitHub private vulnerability reporting and removed embedded icon attestation/EXIF metadata without changing pixels.
+
 - Documented private local signing, certificate storage, architecture-specific client policy, and post-install reboot verification.
 - Added troubleshooting for the Local-console-only remote-control warning, including intentional remote-desktop use and inconclusive service checks.
 
-For the design, security properties, deployment process, and reboot verification procedure, see [Packet Filter Reboot Recovery](docs/PACKET_FILTER_REBOOT_RECOVERY.md).
+See [Architecture](docs/ARCHITECTURE.md), [Security model](docs/SECURITY_MODEL.md), and [Installation](docs/INSTALLATION.md) for the current design and procedures.

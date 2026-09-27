@@ -8,7 +8,7 @@ final class AcceptanceManifestTests: XCTestCase {
     }
 
     func testEveryApprovedPhysicalGateHasAnInstruction() throws {
-        let readme = try repositoryFile("docs/SECURITY_AND_OPERATIONS.md")
+        let readme = try repositoryFile("docs/INSTALLATION.md")
         for heading in [
             "Install from the attached console",
             "Verify CLOSED before login",
